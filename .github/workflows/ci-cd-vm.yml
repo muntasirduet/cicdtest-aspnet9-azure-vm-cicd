@@ -1,0 +1,109 @@
+name: CI-CD to Azure VM
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  APP_NAME: cicdtest
+  SERVICE_NAME: cicdtest
+  DEPLOY_PATH: /var/www/cicdtest
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ./CiCdTest.csproj
+
+      - name: Build
+        run: dotnet build ./CiCdTest.csproj --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish ./CiCdTest.csproj --configuration Release --output ./publish
+
+      - name: Archive publish output
+        run: |
+          cd publish
+          zip -r ../published.zip .
+
+      - name: Azure login (Service Principal)
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Ensure deployment container exists
+        run: |
+          az storage container create \
+            --account-name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
+            --name "${{ secrets.AZURE_STORAGE_CONTAINER }}" \
+            --auth-mode login
+
+      - name: Upload package to Blob Storage
+        env:
+          BLOB_NAME: "${{ github.repository }}-${{ github.sha }}.zip"
+        run: |
+          az storage blob upload \
+            --account-name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ secrets.AZURE_STORAGE_CONTAINER }}" \
+            --name "$BLOB_NAME" \
+            --file published.zip \
+            --overwrite \
+            --auth-mode login
+
+          EXPIRY="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%MZ')"
+          SAS_TOKEN="$(az storage blob generate-sas \
+            --account-name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
+            --container-name "${{ secrets.AZURE_STORAGE_CONTAINER }}" \
+            --name "$BLOB_NAME" \
+            --permissions r \
+            --expiry "$EXPIRY" \
+            --https-only \
+            --auth-mode login \
+            --as-user \
+            -o tsv)"
+
+          PACKAGE_URL="https://${{ secrets.AZURE_STORAGE_ACCOUNT }}.blob.core.windows.net/${{ secrets.AZURE_STORAGE_CONTAINER }}/$BLOB_NAME?$SAS_TOKEN"
+          echo "PACKAGE_URL=$PACKAGE_URL" >> "$GITHUB_ENV"
+
+      - name: Deploy on Azure VM via Run Command
+        run: |
+          REMOTE_SCRIPT="$(cat <<EOF
+          set -euo pipefail
+          SERVICE_NAME='${SERVICE_NAME}'
+          DEPLOY_PATH='${DEPLOY_PATH}'
+          PACKAGE_URL='${PACKAGE_URL}'
+
+          sudo systemctl stop \$SERVICE_NAME || true
+          sudo mkdir -p \$DEPLOY_PATH
+          sudo rm -rf \$DEPLOY_PATH/*
+
+          rm -rf /tmp/cicdtest-deploy && mkdir -p /tmp/cicdtest-deploy
+          curl -fL \"\$PACKAGE_URL\" -o /tmp/cicdtest-deploy/published.zip
+
+          sudo unzip -o /tmp/cicdtest-deploy/published.zip -d \$DEPLOY_PATH
+          sudo chown -R www-data:www-data \$DEPLOY_PATH
+
+          sudo systemctl daemon-reload
+          sudo systemctl start \$SERVICE_NAME
+          sudo systemctl enable \$SERVICE_NAME
+          sudo systemctl --no-pager --full status \$SERVICE_NAME
+          EOF
+          )"
+
+          az vm run-command invoke \
+            --resource-group "${{ secrets.AZURE_VM_RESOURCE_GROUP }}" \
+            --name "${{ secrets.AZURE_VM_NAME }}" \
+            --command-id RunShellScript \
+            --scripts "$REMOTE_SCRIPT"

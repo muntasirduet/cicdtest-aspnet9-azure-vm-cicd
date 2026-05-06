@@ -1,0 +1,18 @@
+[Unit]
+Description=CiCdTest ASP.NET Core 9 Razor Pages
+After=network.target
+
+[Service]
+WorkingDirectory=/var/www/cicdtest
+ExecStart=/usr/bin/dotnet /var/www/cicdtest/CiCdTest.dll
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+SyslogIdentifier=cicdtest
+User=www-data
+Group=www-data
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
+
+[Install]
+WantedBy=multi-user.target
