@@ -80,7 +80,7 @@ jobs:
       - name: Deploy on Azure VM via Run Command
         run: |
           REMOTE_SCRIPT="$(cat <<EOF
-          set -euo pipefail
+          set -eu
           SERVICE_NAME='${SERVICE_NAME}'
           DEPLOY_PATH='${DEPLOY_PATH}'
           PACKAGE_URL='${PACKAGE_URL}'
@@ -88,6 +88,7 @@ jobs:
           sudo systemctl stop \$SERVICE_NAME || true
           sudo mkdir -p \$DEPLOY_PATH
           sudo rm -rf \$DEPLOY_PATH/*
+          sudo rm -f /etc/nginx/sites-enabled/default
 
           rm -rf /tmp/cicdtest-deploy && mkdir -p /tmp/cicdtest-deploy
           curl -fL \"\$PACKAGE_URL\" -o /tmp/cicdtest-deploy/published.zip
