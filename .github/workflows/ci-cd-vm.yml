@@ -91,7 +91,7 @@ jobs:
           sudo rm -f /etc/nginx/sites-enabled/default
 
           rm -rf /tmp/cicdtest-deploy && mkdir -p /tmp/cicdtest-deploy
-          curl -fL \"\$PACKAGE_URL\" -o /tmp/cicdtest-deploy/published.zip
+          curl -fL "\$PACKAGE_URL" -o /tmp/cicdtest-deploy/published.zip
 
           sudo unzip -o /tmp/cicdtest-deploy/published.zip -d \$DEPLOY_PATH
           sudo chown -R www-data:www-data \$DEPLOY_PATH
